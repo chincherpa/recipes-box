@@ -1,28 +1,22 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { jsPDF } from "jspdf";
 import RecipeEditor from "@/components/RecipeEditor";
 import RecipeCard from "@/components/RecipeCard";
 import DeleteConfirmModal from "@/components/DeleteConfirmModal";
-
-interface Ingredient {
-  zutat: string;
-  menge: string;
-  taetigkeit: string;
-}
-
-interface Recipe {
-  name: string;
-  ingredients: Ingredient[];
-}
+import CategoryFilter from "@/components/CategoryFilter";
+import CategoryManager from "@/components/CategoryManager";
+import { Recipe, Category } from "@/types";
 
 export default function Home() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   // Editor state
   const [editorOpen, setEditorOpen] = useState(false);
@@ -32,25 +26,52 @@ export default function Home() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [recipeToDelete, setRecipeToDelete] = useState<Recipe | null>(null);
 
+  // Category manager state
+  const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
+
   // Rezepte laden
   const loadRecipes = useCallback(async () => {
     try {
-      setLoading(true);
       const response = await fetch("/api/recipes");
       if (!response.ok) throw new Error("Fehler beim Laden");
       const data = await response.json();
       setRecipes(data);
-      setError("");
     } catch {
       setError("Rezepte konnten nicht geladen werden");
-    } finally {
-      setLoading(false);
+    }
+  }, []);
+
+  // Kategorien laden
+  const loadCategories = useCallback(async () => {
+    try {
+      const response = await fetch("/api/categories");
+      if (!response.ok) throw new Error("Fehler beim Laden");
+      const data = await response.json();
+      setCategories(data);
+    } catch {
+      setError("Kategorien konnten nicht geladen werden");
     }
   }, []);
 
   useEffect(() => {
-    loadRecipes();
-  }, [loadRecipes]);
+    const loadAll = async () => {
+      setLoading(true);
+      await Promise.all([loadRecipes(), loadCategories()]);
+      setLoading(false);
+      setError("");
+    };
+    loadAll();
+  }, [loadRecipes, loadCategories]);
+
+  // Rezept-Counts pro Kategorie
+  const recipeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    recipes.forEach((recipe) => {
+      const cat = recipe.category || "Ohne Kategorie";
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return counts;
+  }, [recipes]);
 
   // Neues Rezept erstellen
   const handleNewRecipe = () => {
@@ -124,6 +145,74 @@ export default function Home() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Kategorie speichern
+  const handleSaveCategory = async (category: Category, originalId?: string) => {
+    const isEdit = !!originalId;
+    const method = isEdit ? "PUT" : "POST";
+    const body = isEdit
+      ? JSON.stringify({ originalId, category })
+      : JSON.stringify(category);
+
+    const response = await fetch("/api/categories", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || "Fehler beim Speichern");
+    }
+
+    // Wenn Kategorie umbenannt wurde, Rezepte aktualisieren
+    if (isEdit) {
+      const oldCategory = categories.find(c => c.id === originalId);
+      if (oldCategory && oldCategory.name !== category.name) {
+        await fetch("/api/recipes", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            oldCategory: oldCategory.name,
+            newCategory: category.name,
+          }),
+        });
+        await loadRecipes();
+      }
+    }
+
+    await loadCategories();
+  };
+
+  // Kategorie löschen
+  const handleDeleteCategory = async (id: string, categoryName: string) => {
+    const response = await fetch("/api/categories", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || "Fehler beim Löschen");
+    }
+
+    // Rezepte dieser Kategorie auf leer setzen
+    await fetch("/api/recipes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        oldCategory: categoryName,
+        newCategory: "",
+      }),
+    });
+
+    if (selectedCategory === categoryName) {
+      setSelectedCategory(null);
+    }
+
+    await Promise.all([loadCategories(), loadRecipes()]);
   };
 
   // PDF generieren
@@ -204,10 +293,6 @@ export default function Home() {
       });
     };
 
-    const filteredRecipes = recipes.filter((r) =>
-      r.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-
     filteredRecipes.forEach((recipe, index) => {
       const positionOnPage = index % 4;
 
@@ -223,9 +308,13 @@ export default function Home() {
   };
 
   // Gefilterte Rezepte
-  const filteredRecipes = recipes.filter((r) =>
-    r.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredRecipes = useMemo(() => {
+    return recipes.filter((r) => {
+      const matchesSearch = r.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesCategory = selectedCategory === null || r.category === selectedCategory;
+      return matchesSearch && matchesCategory;
+    });
+  }, [recipes, searchTerm, selectedCategory]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-amber-50 to-orange-100">
@@ -266,6 +355,16 @@ export default function Home() {
               Neues Rezept
             </button>
 
+            <button
+              onClick={() => setCategoryManagerOpen(true)}
+              className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg shadow transition-colors flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
+              </svg>
+              Kategorien
+            </button>
+
             {recipes.length > 0 && (
               <button
                 onClick={generatePDF}
@@ -293,6 +392,16 @@ export default function Home() {
             </svg>
           </div>
         </div>
+
+        {/* Kategorie-Filter */}
+        {!loading && categories.length > 0 && (
+          <CategoryFilter
+            categories={categories}
+            selectedCategory={selectedCategory}
+            onSelectCategory={setSelectedCategory}
+            recipeCounts={recipeCounts}
+          />
+        )}
 
         {/* Ladezustand */}
         {loading && (
@@ -326,8 +435,21 @@ export default function Home() {
           <div className="text-center py-12 bg-white rounded-xl shadow-md">
             <div className="text-5xl mb-4">🔍</div>
             <p className="text-amber-700">
-              Keine Rezepte für &quot;{searchTerm}&quot; gefunden
+              Keine Rezepte gefunden
+              {searchTerm && ` für "${searchTerm}"`}
+              {selectedCategory && ` in Kategorie "${selectedCategory}"`}
             </p>
+            {(searchTerm || selectedCategory) && (
+              <button
+                onClick={() => {
+                  setSearchTerm("");
+                  setSelectedCategory(null);
+                }}
+                className="mt-4 text-amber-600 hover:text-amber-800 font-medium"
+              >
+                Filter zurücksetzen
+              </button>
+            )}
           </div>
         )}
 
@@ -337,12 +459,14 @@ export default function Home() {
             <div className="mb-4 text-amber-700">
               {filteredRecipes.length} Rezept{filteredRecipes.length !== 1 ? "e" : ""}
               {searchTerm && ` für "${searchTerm}"`}
+              {selectedCategory && ` in "${selectedCategory}"`}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredRecipes.map((recipe) => (
                 <RecipeCard
                   key={recipe.name}
                   recipe={recipe}
+                  categories={categories}
                   onEdit={handleEdit}
                   onDelete={handleDeleteClick}
                 />
@@ -355,6 +479,7 @@ export default function Home() {
       {/* Editor Modal */}
       <RecipeEditor
         recipe={editingRecipe}
+        categories={categories}
         isOpen={editorOpen}
         onClose={() => setEditorOpen(false)}
         onSave={handleSave}
@@ -369,6 +494,16 @@ export default function Home() {
           setRecipeToDelete(null);
         }}
         onConfirm={handleDeleteConfirm}
+      />
+
+      {/* Category Manager Modal */}
+      <CategoryManager
+        categories={categories}
+        isOpen={categoryManagerOpen}
+        onClose={() => setCategoryManagerOpen(false)}
+        onSave={handleSaveCategory}
+        onDelete={handleDeleteCategory}
+        recipeCounts={recipeCounts}
       />
 
       {/* Saving Overlay */}

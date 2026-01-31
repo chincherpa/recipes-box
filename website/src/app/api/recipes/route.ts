@@ -8,10 +8,12 @@ interface RecipeRow {
   Zutat: string;
   Menge: string;
   Taetigkeit: string;
+  Kategorie: string;
 }
 
 interface Recipe {
   name: string;
+  category: string;
   ingredients: {
     zutat: string;
     menge: string;
@@ -36,7 +38,11 @@ async function readCSV(): Promise<Recipe[]> {
       if (!name) return;
 
       if (!grouped.has(name)) {
-        grouped.set(name, { name, ingredients: [] });
+        grouped.set(name, {
+          name,
+          category: row.Kategorie?.trim() || "",
+          ingredients: []
+        });
       }
 
       grouped.get(name)!.ingredients.push({
@@ -62,13 +68,14 @@ async function writeCSV(recipes: Recipe[]): Promise<void> {
         Zutat: ing.zutat,
         Menge: ing.menge,
         Taetigkeit: ing.taetigkeit,
+        Kategorie: recipe.category,
       });
     });
   });
 
   const csv = Papa.unparse(rows, {
     header: true,
-    columns: ["Gericht", "Zutat", "Menge", "Taetigkeit"],
+    columns: ["Gericht", "Zutat", "Menge", "Taetigkeit", "Kategorie"],
   });
 
   await fs.writeFile(CSV_PATH, csv, "utf-8");
@@ -148,4 +155,23 @@ export async function DELETE(request: Request) {
   await writeCSV(recipes);
 
   return NextResponse.json({ success: true });
+}
+
+// PATCH - Kategorie für mehrere Rezepte aktualisieren (wenn Kategorie umbenannt wird)
+export async function PATCH(request: Request) {
+  const { oldCategory, newCategory }: { oldCategory: string; newCategory: string } =
+    await request.json();
+  const recipes = await readCSV();
+
+  let updated = 0;
+  recipes.forEach((recipe) => {
+    if (recipe.category === oldCategory) {
+      recipe.category = newCategory;
+      updated++;
+    }
+  });
+
+  await writeCSV(recipes);
+
+  return NextResponse.json({ success: true, updated });
 }

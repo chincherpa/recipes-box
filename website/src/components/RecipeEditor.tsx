@@ -1,20 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-
-interface Ingredient {
-  zutat: string;
-  menge: string;
-  taetigkeit: string;
-}
-
-interface Recipe {
-  name: string;
-  ingredients: Ingredient[];
-}
+import { Recipe, Category, Ingredient } from "@/types";
 
 interface RecipeEditorProps {
   recipe: Recipe | null;
+  categories: Category[];
   isOpen: boolean;
   onClose: () => void;
   onSave: (recipe: Recipe, originalName?: string) => void;
@@ -22,24 +13,28 @@ interface RecipeEditorProps {
 
 export default function RecipeEditor({
   recipe,
+  categories,
   isOpen,
   onClose,
   onSave,
 }: RecipeEditorProps) {
   const [name, setName] = useState("");
+  const [category, setCategory] = useState("");
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (recipe) {
       setName(recipe.name);
+      setCategory(recipe.category || "");
       setIngredients([...recipe.ingredients]);
     } else {
       setName("");
+      setCategory(categories.length > 0 ? categories[0].name : "");
       setIngredients([{ zutat: "", menge: "", taetigkeit: "" }]);
     }
     setError("");
-  }, [recipe, isOpen]);
+  }, [recipe, isOpen, categories]);
 
   const addIngredient = () => {
     setIngredients([...ingredients, { zutat: "", menge: "", taetigkeit: "" }]);
@@ -70,6 +65,11 @@ export default function RecipeEditor({
       return;
     }
 
+    if (!category) {
+      setError("Bitte wähle eine Kategorie aus");
+      return;
+    }
+
     const validIngredients = ingredients.filter(
       (ing) => ing.zutat.trim() || ing.menge.trim() || ing.taetigkeit.trim()
     );
@@ -80,10 +80,12 @@ export default function RecipeEditor({
     }
 
     onSave(
-      { name: name.trim(), ingredients: validIngredients },
+      { name: name.trim(), category, ingredients: validIngredients },
       recipe?.name
     );
   };
+
+  const selectedCategoryData = categories.find(c => c.name === category);
 
   if (!isOpen) return null;
 
@@ -122,6 +124,54 @@ export default function RecipeEditor({
               className="w-full px-4 py-3 border-2 border-amber-200 rounded-lg focus:border-amber-500 focus:outline-none transition-colors text-gray-800"
               placeholder="z.B. Kartoffelsalat"
             />
+          </div>
+
+          {/* Kategorie */}
+          <div className="mb-6">
+            <label className="block text-amber-900 font-semibold mb-2">
+              Kategorie
+            </label>
+            {categories.length === 0 ? (
+              <div className="bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 rounded-lg">
+                Keine Kategorien vorhanden. Bitte erstelle zuerst eine Kategorie.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {categories.map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setCategory(cat.name)}
+                    className={`
+                      flex items-center gap-2 px-4 py-3 rounded-lg font-medium text-sm
+                      transition-all duration-200 border-2
+                      ${category === cat.name
+                        ? "text-white shadow-md scale-[1.02]"
+                        : "hover:scale-[1.01]"
+                      }
+                    `}
+                    style={{
+                      backgroundColor: category === cat.name ? cat.color : `${cat.color}15`,
+                      borderColor: category === cat.name ? cat.color : `${cat.color}40`,
+                      color: category === cat.name ? "white" : cat.color,
+                    }}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{
+                        backgroundColor: category === cat.name ? "white" : cat.color,
+                      }}
+                    />
+                    {cat.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedCategoryData && (
+              <div className="mt-2 text-sm text-gray-500">
+                Ausgewählt: <span className="font-medium" style={{ color: selectedCategoryData.color }}>{selectedCategoryData.name}</span>
+              </div>
+            )}
           </div>
 
           {/* Zutaten */}

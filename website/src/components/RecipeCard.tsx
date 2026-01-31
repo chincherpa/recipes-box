@@ -1,31 +1,42 @@
 "use client";
 
-interface Ingredient {
-  zutat: string;
-  menge: string;
-  taetigkeit: string;
-}
-
-interface Recipe {
-  name: string;
-  ingredients: Ingredient[];
-}
+import { Recipe, Category } from "@/types";
 
 interface RecipeCardProps {
   recipe: Recipe;
+  categories: Category[];
   onEdit: (recipe: Recipe) => void;
   onDelete: (recipe: Recipe) => void;
 }
 
-export default function RecipeCard({ recipe, onEdit, onDelete }: RecipeCardProps) {
+export default function RecipeCard({ recipe, categories, onEdit, onDelete }: RecipeCardProps) {
+  const categoryData = categories.find(c => c.name === recipe.category);
+
   return (
     <div className="bg-white rounded-xl shadow-md border border-amber-200 overflow-hidden group hover:shadow-lg transition-shadow">
       {/* Header mit Aktionen */}
       <div className="bg-gradient-to-r from-amber-100 to-orange-100 px-4 py-3 flex justify-between items-center">
-        <h3 className="font-bold text-amber-900 text-lg truncate flex-1">
-          {recipe.name}
-        </h3>
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-bold text-amber-900 text-lg truncate">
+            {recipe.name}
+          </h3>
+          {categoryData && (
+            <span
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium mt-1"
+              style={{
+                backgroundColor: `${categoryData.color}20`,
+                color: categoryData.color,
+              }}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ backgroundColor: categoryData.color }}
+              />
+              {categoryData.name}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
           <button
             onClick={() => onEdit(recipe)}
             className="p-2 hover:bg-amber-200 rounded-lg transition-colors"
