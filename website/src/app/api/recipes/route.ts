@@ -4,11 +4,11 @@ import path from "path";
 import Papa from "papaparse";
 
 interface RecipeRow {
+  Kategorie: string;
   Gericht: string;
   Zutat: string;
   Menge: string;
-  Taetigkeit: string;
-  Kategorie: string;
+  Tätigkeit: string;
 }
 
 interface Recipe {
@@ -48,7 +48,7 @@ async function readCSV(): Promise<Recipe[]> {
       grouped.get(name)!.ingredients.push({
         zutat: row.Zutat?.trim() || "",
         menge: row.Menge?.trim() || "",
-        taetigkeit: row.Taetigkeit?.trim() || "",
+        taetigkeit: row.Tätigkeit?.trim() || "",
       });
     });
 
@@ -64,18 +64,18 @@ async function writeCSV(recipes: Recipe[]): Promise<void> {
   recipes.forEach((recipe) => {
     recipe.ingredients.forEach((ing) => {
       rows.push({
+        Kategorie: recipe.category,
         Gericht: recipe.name,
         Zutat: ing.zutat,
         Menge: ing.menge,
-        Taetigkeit: ing.taetigkeit,
-        Kategorie: recipe.category,
+        Tätigkeit: ing.taetigkeit,
       });
     });
   });
 
   const csv = Papa.unparse(rows, {
     header: true,
-    columns: ["Gericht", "Zutat", "Menge", "Taetigkeit", "Kategorie"],
+    columns: ["Kategorie", "Gericht", "Zutat", "Menge", "Tätigkeit"],
   });
 
   await fs.writeFile(CSV_PATH, csv, "utf-8");

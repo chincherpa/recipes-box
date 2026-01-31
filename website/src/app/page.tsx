@@ -245,31 +245,36 @@ export default function Home() {
 
       let y = offsetY + margin * 2;
 
-      doc.setDrawColor(200);
+      doc.setDrawColor(0);
       doc.setLineWidth(0.2);
       doc.rect(offsetX, offsetY, cardWidth, cardHeight);
 
+      // Kategorie + Name als Titel
+      const titleText = recipe.category
+        ? `${recipe.category} - ${recipe.name}`
+        : recipe.name;
+
       doc.setFontSize(12);
       doc.setFont("helvetica", "bold");
-      doc.setTextColor(80, 50, 20);
-      const titleLines = doc.splitTextToSize(recipe.name, cardWidth - margin * 2);
+      doc.setTextColor(0, 0, 0);
+      const titleLines = doc.splitTextToSize(titleText, cardWidth - margin * 2);
       doc.text(titleLines, offsetX + cardWidth / 2, y, { align: "center" });
       y += titleLines.length * 5 + 2;
 
-      doc.setDrawColor(180, 140, 100);
+      doc.setDrawColor(0);
       doc.setLineWidth(0.4);
       doc.line(offsetX + margin, y, offsetX + cardWidth - margin, y);
       y += 4;
 
       doc.setFontSize(7);
       doc.setFont("helvetica", "bold");
-      doc.setTextColor(120, 80, 40);
+      doc.setTextColor(0, 0, 0);
       doc.text("Zutat", leftCol, y);
       doc.text("Zubereitung", rightCol, y);
       y += 4;
 
       doc.setFontSize(8);
-      doc.setTextColor(40, 40, 40);
+      doc.setTextColor(0, 0, 0);
 
       recipe.ingredients.forEach((ing) => {
         if (y > offsetY + cardHeight - margin - 4) return;

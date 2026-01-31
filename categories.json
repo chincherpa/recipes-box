@@ -19,8 +19,8 @@
       "color": "#7C3AED"
     },
     {
-      "id": "huelsenfruechte",
-      "name": "Huelsenfruechte",
+      "id": "hülsenfrüchte",
+      "name": "Hülsenfrüchte",
       "icon": "beans",
       "color": "#059669"
     },
@@ -35,6 +35,12 @@
       "name": "Salate",
       "icon": "salad",
       "color": "#65A30D"
+    },
+    {
+      "id": "testkategorie",
+      "name": "testkategorie",
+      "icon": "beans",
+      "color": "#DC2626"
     }
   ]
 }
