@@ -430,12 +430,12 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-amber-50 to-orange-100">
       {/* Header */}
-      <header className="bg-gradient-to-r from-amber-600 to-orange-500 text-white py-8 px-4 shadow-lg">
+      <header className="sticky top-0 z-50 bg-gradient-to-r from-amber-600 to-orange-500 text-white py-8 px-4 shadow-lg">
         <div className="max-w-6xl mx-auto">
           <h1 className="text-4xl font-bold text-center mb-2">Rezeptbox</h1>
-          <p className="text-center text-amber-100">
+          {/* <p className="text-center text-amber-100">
             Verwalte deine Lieblingsrezepte und erstelle PDF-Kärtchen
-          </p>
+          </p> */}
         </div>
       </header>
 
