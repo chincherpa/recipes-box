@@ -7,6 +7,7 @@ import RecipeCard from "@/components/RecipeCard";
 import DeleteConfirmModal from "@/components/DeleteConfirmModal";
 import CategoryFilter from "@/components/CategoryFilter";
 import CategoryManager from "@/components/CategoryManager";
+import SelectedRecipesModal from "@/components/SelectedRecipesModal";
 import { Recipe, Category } from "@/types";
 
 export default function Home() {
@@ -28,6 +29,15 @@ export default function Home() {
 
   // Category manager state
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
+
+  // Selected recipes modal state
+  const [selectedModalOpen, setSelectedModalOpen] = useState(false);
+
+  // PDF-Auswahl State (persistent während der Sitzung)
+  const [selectedForPdf, setSelectedForPdf] = useState<Set<string>>(new Set());
+
+  // Tracking der in dieser Sitzung hinzugefügten Rezepte
+  const [addedThisSession, setAddedThisSession] = useState<Set<string>>(new Set());
 
   // Rezepte laden
   const loadRecipes = useCallback(async () => {
@@ -108,6 +118,31 @@ export default function Home() {
         throw new Error(data.error || "Fehler beim Speichern");
       }
 
+      // Bei Umbenennung: PDF-Auswahl und Session-Tracking aktualisieren
+      if (isEdit && originalName !== recipe.name) {
+        if (selectedForPdf.has(originalName)) {
+          setSelectedForPdf(prev => {
+            const next = new Set(prev);
+            next.delete(originalName);
+            next.add(recipe.name);
+            return next;
+          });
+        }
+        if (addedThisSession.has(originalName)) {
+          setAddedThisSession(prev => {
+            const next = new Set(prev);
+            next.delete(originalName);
+            next.add(recipe.name);
+            return next;
+          });
+        }
+      }
+
+      // Neues Rezept zur Session-Liste hinzufügen
+      if (!isEdit) {
+        setAddedThisSession(prev => new Set(prev).add(recipe.name));
+      }
+
       setEditorOpen(false);
       await loadRecipes();
     } catch (err) {
@@ -137,6 +172,17 @@ export default function Home() {
 
       if (!response.ok) throw new Error("Fehler beim Löschen");
 
+      // Aus PDF-Auswahl und Session-Tracking entfernen
+      setSelectedForPdf(prev => {
+        const next = new Set(prev);
+        next.delete(recipeToDelete.name);
+        return next;
+      });
+      setAddedThisSession(prev => {
+        const next = new Set(prev);
+        next.delete(recipeToDelete.name);
+        return next;
+      });
       setDeleteModalOpen(false);
       setRecipeToDelete(null);
       await loadRecipes();
@@ -214,6 +260,56 @@ export default function Home() {
 
     await Promise.all([loadCategories(), loadRecipes()]);
   };
+
+  // Rezept für PDF auswählen/abwählen
+  const togglePdfSelection = (recipeName: string) => {
+    setSelectedForPdf(prev => {
+      const next = new Set(prev);
+      if (next.has(recipeName)) {
+        next.delete(recipeName);
+      } else {
+        next.add(recipeName);
+      }
+      return next;
+    });
+  };
+
+  // Neu hinzugefügte Rezepte dieser Sitzung auswählen
+  const selectAddedThisSession = () => {
+    setSelectedForPdf(prev => {
+      const next = new Set(prev);
+      addedThisSession.forEach(name => next.add(name));
+      return next;
+    });
+  };
+
+  // Alle gefilterten Rezepte auswählen/abwählen
+  const toggleAllFiltered = () => {
+    const filteredNames = filteredRecipes.map(r => r.name);
+    const allSelected = filteredNames.every(name => selectedForPdf.has(name));
+
+    setSelectedForPdf(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        // Alle abwählen
+        filteredNames.forEach(name => next.delete(name));
+      } else {
+        // Alle auswählen
+        filteredNames.forEach(name => next.add(name));
+      }
+      return next;
+    });
+  };
+
+  // Alle Auswahlen entfernen
+  const clearAllSelections = () => {
+    setSelectedForPdf(new Set());
+  };
+
+  // Rezepte für PDF-Export (nur ausgewählte)
+  const recipesForPdf = useMemo(() => {
+    return recipes.filter(r => selectedForPdf.has(r.name));
+  }, [recipes, selectedForPdf]);
 
   // PDF generieren
   const generatePDF = () => {
@@ -298,7 +394,7 @@ export default function Home() {
       });
     };
 
-    filteredRecipes.forEach((recipe, index) => {
+    recipesForPdf.forEach((recipe, index) => {
       const positionOnPage = index % 4;
 
       if (index > 0 && positionOnPage === 0) {
@@ -371,15 +467,37 @@ export default function Home() {
             </button>
 
             {recipes.length > 0 && (
-              <button
-                onClick={generatePDF}
-                className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg shadow transition-colors flex items-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V8z" clipRule="evenodd" />
-                </svg>
-                PDF ({filteredRecipes.length})
-              </button>
+              <>
+                <button
+                  onClick={() => setSelectedModalOpen(true)}
+                  disabled={selectedForPdf.size === 0}
+                  className={`font-bold py-2 px-4 rounded-lg shadow transition-colors flex items-center gap-2 ${
+                    selectedForPdf.size > 0
+                      ? "bg-blue-500 hover:bg-blue-600 text-white"
+                      : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  }`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
+                    <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd" />
+                  </svg>
+                  Auswahl ({selectedForPdf.size})
+                </button>
+                <button
+                  onClick={generatePDF}
+                  disabled={selectedForPdf.size === 0}
+                  className={`font-bold py-2 px-4 rounded-lg shadow transition-colors flex items-center gap-2 ${
+                    selectedForPdf.size > 0
+                      ? "bg-amber-600 hover:bg-amber-700 text-white"
+                      : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  }`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V8z" clipRule="evenodd" />
+                  </svg>
+                  PDF
+                </button>
+              </>
             )}
           </div>
 
@@ -461,10 +579,42 @@ export default function Home() {
         {/* Rezeptliste */}
         {!loading && filteredRecipes.length > 0 && (
           <>
-            <div className="mb-4 text-amber-700">
-              {filteredRecipes.length} Rezept{filteredRecipes.length !== 1 ? "e" : ""}
-              {searchTerm && ` für "${searchTerm}"`}
-              {selectedCategory && ` in "${selectedCategory}"`}
+            <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
+              <span className="text-amber-700">
+                {filteredRecipes.length} Rezept{filteredRecipes.length !== 1 ? "e" : ""}
+                {searchTerm && ` für "${searchTerm}"`}
+                {selectedCategory && ` in "${selectedCategory}"`}
+                {selectedForPdf.size > 0 && (
+                  <span className="ml-2 text-amber-600 font-medium">
+                    ({selectedForPdf.size} ausgewählt)
+                  </span>
+                )}
+              </span>
+              <div className="flex items-center gap-3">
+                {addedThisSession.size > 0 && (
+                  <button
+                    onClick={selectAddedThisSession}
+                    className="text-sm text-green-600 hover:text-green-800 font-medium flex items-center gap-1"
+                    title={`${addedThisSession.size} Rezept${addedThisSession.size !== 1 ? "e" : ""} in dieser Sitzung hinzugefügt`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                    </svg>
+                    Neue auswählen ({addedThisSession.size})
+                  </button>
+                )}
+                <button
+                  onClick={toggleAllFiltered}
+                  className="text-sm text-amber-600 hover:text-amber-800 font-medium flex items-center gap-1"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  {filteredRecipes.every(r => selectedForPdf.has(r.name))
+                    ? "Alle abwählen"
+                    : "Alle auswählen"}
+                </button>
+              </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredRecipes.map((recipe) => (
@@ -474,6 +624,8 @@ export default function Home() {
                   categories={categories}
                   onEdit={handleEdit}
                   onDelete={handleDeleteClick}
+                  isSelectedForPdf={selectedForPdf.has(recipe.name)}
+                  onTogglePdfSelection={togglePdfSelection}
                 />
               ))}
             </div>
@@ -509,6 +661,17 @@ export default function Home() {
         onSave={handleSaveCategory}
         onDelete={handleDeleteCategory}
         recipeCounts={recipeCounts}
+      />
+
+      {/* Selected Recipes Modal */}
+      <SelectedRecipesModal
+        recipes={recipesForPdf}
+        categories={categories}
+        isOpen={selectedModalOpen}
+        onClose={() => setSelectedModalOpen(false)}
+        onRemove={togglePdfSelection}
+        onClearAll={clearAllSelections}
+        onGeneratePdf={generatePDF}
       />
 
       {/* Saving Overlay */}

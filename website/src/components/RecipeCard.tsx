@@ -7,15 +7,26 @@ interface RecipeCardProps {
   categories: Category[];
   onEdit: (recipe: Recipe) => void;
   onDelete: (recipe: Recipe) => void;
+  isSelectedForPdf: boolean;
+  onTogglePdfSelection: (recipeName: string) => void;
 }
 
-export default function RecipeCard({ recipe, categories, onEdit, onDelete }: RecipeCardProps) {
+export default function RecipeCard({ recipe, categories, onEdit, onDelete, isSelectedForPdf, onTogglePdfSelection }: RecipeCardProps) {
   const categoryData = categories.find(c => c.name === recipe.category);
 
   return (
     <div className="bg-white rounded-xl shadow-md border border-amber-200 overflow-hidden group hover:shadow-lg transition-shadow">
       {/* Header mit Aktionen */}
       <div className="bg-gradient-to-r from-amber-100 to-orange-100 px-4 py-3 flex justify-between items-center">
+        {/* PDF-Auswahl Checkbox */}
+        <label className="flex items-center cursor-pointer mr-3" title="Für PDF auswählen">
+          <input
+            type="checkbox"
+            checked={isSelectedForPdf}
+            onChange={() => onTogglePdfSelection(recipe.name)}
+            className="w-5 h-5 rounded border-2 border-amber-400 text-amber-600 focus:ring-amber-500 focus:ring-2 cursor-pointer"
+          />
+        </label>
         <div className="flex-1 min-w-0">
           <h3 className="font-bold text-amber-900 text-lg truncate">
             {recipe.name}
