@@ -21,6 +21,7 @@ export default function RecipeEditor({
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [bemerkung, setBemerkung] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -28,10 +29,12 @@ export default function RecipeEditor({
       setName(recipe.name);
       setCategory(recipe.category || "");
       setIngredients([...recipe.ingredients]);
+      setBemerkung(recipe.bemerkung || "");
     } else {
       setName("");
       setCategory(categories.length > 0 ? categories[0].name : "");
       setIngredients([{ zutat: "", menge: "", taetigkeit: "" }]);
+      setBemerkung("");
     }
     setError("");
   }, [recipe, isOpen, categories]);
@@ -80,7 +83,7 @@ export default function RecipeEditor({
     }
 
     onSave(
-      { name: name.trim(), category, ingredients: validIngredients },
+      { name: name.trim(), category, ingredients: validIngredients, bemerkung: bemerkung.trim() },
       recipe?.name
     );
   };
@@ -172,6 +175,20 @@ export default function RecipeEditor({
                 Ausgewählt: <span className="font-medium" style={{ color: selectedCategoryData.color }}>{selectedCategoryData.name}</span>
               </div>
             )}
+          </div>
+
+          {/* Bemerkung */}
+          <div className="mb-6">
+            <label className="block text-amber-900 font-semibold mb-2">
+              Bemerkung
+            </label>
+            <textarea
+              value={bemerkung}
+              onChange={(e) => setBemerkung(e.target.value)}
+              className="w-full px-4 py-3 border-2 border-amber-200 rounded-lg focus:border-amber-500 focus:outline-none transition-colors text-gray-800 resize-none"
+              placeholder="Optionale Anmerkungen zum Rezept..."
+              rows={2}
+            />
           </div>
 
           {/* Zutaten */}
