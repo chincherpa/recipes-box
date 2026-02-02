@@ -341,8 +341,8 @@ export default function Home() {
 
       let y = offsetY + margin * 2;
 
-      doc.setDrawColor(0);
-      doc.setLineWidth(0.2);
+      doc.setDrawColor(180);
+      doc.setLineWidth(0.03);
       doc.rect(offsetX, offsetY, cardWidth, cardHeight);
 
       // Kategorie + Name als Titel
@@ -356,6 +356,16 @@ export default function Home() {
       const titleLines = doc.splitTextToSize(titleText, cardWidth - margin * 2);
       doc.text(titleLines, offsetX + cardWidth / 2, y, { align: "center" });
       y += titleLines.length * 5 + 2;
+
+      // Bemerkung (falls vorhanden)
+      if (recipe.bemerkung) {
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "italic");
+        doc.setTextColor(100, 100, 100);
+        const bemerkungLines = doc.splitTextToSize(recipe.bemerkung, cardWidth - margin * 2);
+        doc.text(bemerkungLines, offsetX + cardWidth / 2, y, { align: "center" });
+        y += bemerkungLines.length * 3 + 2;
+      }
 
       doc.setDrawColor(0);
       doc.setLineWidth(0.4);
