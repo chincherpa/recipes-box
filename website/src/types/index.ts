@@ -8,6 +8,7 @@ export interface Recipe {
   name: string;
   category: string;
   ingredients: Ingredient[];
+  bemerkung?: string;
 }
 
 export interface Category {

@@ -69,6 +69,15 @@ export default function RecipeCard({ recipe, categories, onEdit, onDelete, isSel
         </div>
       </div>
 
+      {/* Bemerkung */}
+      {recipe.bemerkung && (
+        <div className="px-4 pt-3 pb-1">
+          <p className="text-sm text-gray-600 italic bg-amber-50 rounded-lg px-3 py-2 border-l-4 border-amber-400">
+            {recipe.bemerkung}
+          </p>
+        </div>
+      )}
+
       {/* Zutaten */}
       <div className="p-4">
         <ul className="space-y-2 max-h-64 overflow-y-auto">
