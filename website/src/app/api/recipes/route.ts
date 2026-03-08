@@ -1,181 +1,187 @@
 import { NextResponse } from "next/server";
-import fs from "fs/promises";
-import path from "path";
-import Papa from "papaparse";
+import { getDb } from "@/lib/db";
 
-interface RecipeRow {
-  Kategorie: string;
-  Gericht: string;
-  Zutat: string;
-  Menge: string;
-  Tätigkeit: string;
-  Bemerkung: string;
+interface Ingredient {
+  zutat: string;
+  menge: string;
+  taetigkeit: string;
 }
 
 interface Recipe {
   name: string;
   category: string;
-  ingredients: {
-    zutat: string;
-    menge: string;
-    taetigkeit: string;
-  }[];
+  ingredients: Ingredient[];
   bemerkung?: string;
 }
 
-const CSV_PATH = path.join(process.cwd(), "..", "rezepte.csv");
-
-async function readCSV(): Promise<Recipe[]> {
-  try {
-    const content = await fs.readFile(CSV_PATH, "utf-8");
-    const results = Papa.parse<RecipeRow>(content, {
-      header: true,
-      skipEmptyLines: true,
-    });
-
-    const grouped = new Map<string, Recipe>();
-
-    results.data.forEach((row) => {
-      const name = row.Gericht?.trim();
-      if (!name) return;
-
-      if (!grouped.has(name)) {
-        grouped.set(name, {
-          name,
-          category: row.Kategorie?.trim() || "",
-          ingredients: [],
-          bemerkung: row.Bemerkung?.trim() || "",
-        });
-      }
-
-      grouped.get(name)!.ingredients.push({
-        zutat: row.Zutat?.trim() || "",
-        menge: row.Menge?.trim() || "",
-        taetigkeit: row.Tätigkeit?.trim() || "",
-      });
-    });
-
-    return Array.from(grouped.values());
-  } catch {
-    return [];
-  }
+interface RecipeRow {
+  id: number;
+  name: string;
+  category: string;
+  bemerkung: string;
 }
 
-async function writeCSV(recipes: Recipe[]): Promise<void> {
-  const rows: RecipeRow[] = [];
+interface IngredientRow {
+  zutat: string;
+  menge: string;
+  taetigkeit: string;
+  sort_order: number;
+}
 
-  recipes.forEach((recipe) => {
-    recipe.ingredients.forEach((ing, index) => {
-      rows.push({
-        Kategorie: recipe.category,
-        Gericht: recipe.name,
-        Zutat: ing.zutat,
-        Menge: ing.menge,
-        Tätigkeit: ing.taetigkeit,
-        Bemerkung: index === 0 ? (recipe.bemerkung || "") : "",
-      });
+function getAllRecipes(): Recipe[] {
+  const db = getDb();
+  const recipes = db.prepare("SELECT id, name, category, bemerkung FROM recipes ORDER BY name").all() as RecipeRow[];
+  const result: Recipe[] = [];
+
+  for (const r of recipes) {
+    const ingredients = db
+      .prepare(
+        "SELECT zutat, menge, taetigkeit FROM ingredients WHERE recipe_id = ? ORDER BY sort_order"
+      )
+      .all(r.id) as IngredientRow[];
+
+    result.push({
+      name: r.name,
+      category: r.category,
+      bemerkung: r.bemerkung,
+      ingredients: ingredients.map((i) => ({
+        zutat: i.zutat,
+        menge: i.menge,
+        taetigkeit: i.taetigkeit,
+      })),
     });
-  });
+  }
 
-  const csv = Papa.unparse(rows, {
-    header: true,
-    columns: ["Kategorie", "Gericht", "Zutat", "Menge", "Tätigkeit", "Bemerkung"],
-  });
-
-  await fs.writeFile(CSV_PATH, csv, "utf-8");
+  return result;
 }
 
 // GET - Alle Rezepte lesen
 export async function GET() {
-  const recipes = await readCSV();
-  return NextResponse.json(recipes);
+  try {
+    const recipes = getAllRecipes();
+    return NextResponse.json(recipes);
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+  }
 }
 
 // POST - Neues Rezept hinzufügen
 export async function POST(request: Request) {
-  const newRecipe: Recipe = await request.json();
-  const recipes = await readCSV();
+  try {
+    const newRecipe: Recipe = await request.json();
+    const db = getDb();
 
-  // Prüfen ob Rezept schon existiert
-  const existingIndex = recipes.findIndex((r) => r.name === newRecipe.name);
-  if (existingIndex >= 0) {
-    return NextResponse.json(
-      { error: "Rezept existiert bereits" },
-      { status: 400 }
-    );
+    const existing = db.prepare("SELECT id FROM recipes WHERE name = ?").get(newRecipe.name);
+    if (existing) {
+      return NextResponse.json({ error: "Rezept existiert bereits" }, { status: 400 });
+    }
+
+    const tx = db.transaction(() => {
+      const info = db
+        .prepare("INSERT INTO recipes (name, category, bemerkung) VALUES (?, ?, ?)")
+        .run(newRecipe.name, newRecipe.category, newRecipe.bemerkung ?? "");
+
+      const recipeId = info.lastInsertRowid;
+      const insertIng = db.prepare(
+        "INSERT INTO ingredients (recipe_id, zutat, menge, taetigkeit, sort_order) VALUES (?, ?, ?, ?, ?)"
+      );
+      newRecipe.ingredients.forEach((ing, i) => {
+        insertIng.run(recipeId, ing.zutat, ing.menge, ing.taetigkeit, i);
+      });
+    });
+
+    tx();
+    return NextResponse.json(newRecipe, { status: 201 });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
   }
-
-  recipes.push(newRecipe);
-  await writeCSV(recipes);
-
-  return NextResponse.json(newRecipe, { status: 201 });
 }
 
 // PUT - Rezept aktualisieren
 export async function PUT(request: Request) {
-  const { originalName, recipe }: { originalName: string; recipe: Recipe } =
-    await request.json();
-  const recipes = await readCSV();
+  try {
+    const { originalName, recipe }: { originalName: string; recipe: Recipe } = await request.json();
+    const db = getDb();
 
-  const index = recipes.findIndex((r) => r.name === originalName);
-  if (index < 0) {
-    return NextResponse.json(
-      { error: "Rezept nicht gefunden" },
-      { status: 404 }
-    );
-  }
-
-  // Wenn Name geändert wurde, prüfen ob neuer Name schon existiert
-  if (originalName !== recipe.name) {
-    const duplicate = recipes.findIndex((r) => r.name === recipe.name);
-    if (duplicate >= 0) {
-      return NextResponse.json(
-        { error: "Ein Rezept mit diesem Namen existiert bereits" },
-        { status: 400 }
-      );
+    const existing = db.prepare("SELECT id FROM recipes WHERE name = ?").get(originalName) as { id: number } | undefined;
+    if (!existing) {
+      return NextResponse.json({ error: "Rezept nicht gefunden" }, { status: 404 });
     }
+
+    if (originalName !== recipe.name) {
+      const duplicate = db.prepare("SELECT id FROM recipes WHERE name = ?").get(recipe.name);
+      if (duplicate) {
+        return NextResponse.json(
+          { error: "Ein Rezept mit diesem Namen existiert bereits" },
+          { status: 400 }
+        );
+      }
+    }
+
+    const tx = db.transaction(() => {
+      db.prepare("UPDATE recipes SET name = ?, category = ?, bemerkung = ? WHERE id = ?").run(
+        recipe.name,
+        recipe.category,
+        recipe.bemerkung ?? "",
+        existing.id
+      );
+
+      // Alte Zutaten löschen (ON DELETE CASCADE würde nicht helfen, da wir nur updaten)
+      db.prepare("DELETE FROM ingredients WHERE recipe_id = ?").run(existing.id);
+
+      const insertIng = db.prepare(
+        "INSERT INTO ingredients (recipe_id, zutat, menge, taetigkeit, sort_order) VALUES (?, ?, ?, ?, ?)"
+      );
+      recipe.ingredients.forEach((ing, i) => {
+        insertIng.run(existing.id, ing.zutat, ing.menge, ing.taetigkeit, i);
+      });
+    });
+
+    tx();
+    return NextResponse.json(recipe);
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
   }
-
-  recipes[index] = recipe;
-  await writeCSV(recipes);
-
-  return NextResponse.json(recipe);
 }
 
 // DELETE - Rezept löschen
 export async function DELETE(request: Request) {
-  const { name }: { name: string } = await request.json();
-  const recipes = await readCSV();
+  try {
+    const { name }: { name: string } = await request.json();
+    const db = getDb();
 
-  const index = recipes.findIndex((r) => r.name === name);
-  if (index < 0) {
-    return NextResponse.json(
-      { error: "Rezept nicht gefunden" },
-      { status: 404 }
-    );
+    const existing = db.prepare("SELECT id FROM recipes WHERE name = ?").get(name) as { id: number } | undefined;
+    if (!existing) {
+      return NextResponse.json({ error: "Rezept nicht gefunden" }, { status: 404 });
+    }
+
+    // Ingredients werden durch ON DELETE CASCADE automatisch gelöscht
+    db.prepare("DELETE FROM recipes WHERE id = ?").run(existing.id);
+
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
   }
-
-  recipes.splice(index, 1);
-  await writeCSV(recipes);
-
-  return NextResponse.json({ success: true });
 }
 
 // PATCH - Kategorie für mehrere Rezepte aktualisieren (wenn Kategorie umbenannt wird)
 export async function PATCH(request: Request) {
-  const { oldCategory, newCategory }: { oldCategory: string; newCategory: string } =
-    await request.json();
-  const recipes = await readCSV();
+  try {
+    const { oldCategory, newCategory }: { oldCategory: string; newCategory: string } =
+      await request.json();
+    const db = getDb();
 
-  let updated = 0;
-  recipes.forEach((recipe) => {
-    if (recipe.category === oldCategory) {
-      recipe.category = newCategory;
-      updated++;
-    }
-  });
+    const info = db
+      .prepare("UPDATE recipes SET category = ? WHERE category = ?")
+      .run(newCategory, oldCategory);
 
-  await writeCSV(recipes);
-
-  return NextResponse.json({ success: true, updated });
+    return NextResponse.json({ success: true, updated: info.changes });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+  }
 }

@@ -5,7 +5,8 @@
       "Bash(timeout:*)",
       "Bash(npm run build:*)",
       "Bash(tree:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(pnpm approve-builds)"
     ]
   }
 }
