@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getSupabase } from "@/lib/supabase";
 
 interface Ingredient {
   zutat: string;
@@ -15,54 +15,47 @@ interface Recipe {
 }
 
 interface RecipeRow {
-  id: number;
   name: string;
   category: string;
   bemerkung: string;
+  ingredients: (Ingredient & { sort_order: number })[];
 }
 
-interface IngredientRow {
-  zutat: string;
-  menge: string;
-  taetigkeit: string;
-  sort_order: number;
+function dbError(e: unknown) {
+  console.error(e);
+  return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
 }
 
-function getAllRecipes(): Recipe[] {
-  const db = getDb();
-  const recipes = db.prepare("SELECT id, name, category, bemerkung FROM recipes ORDER BY name").all() as RecipeRow[];
-  const result: Recipe[] = [];
-
-  for (const r of recipes) {
-    const ingredients = db
-      .prepare(
-        "SELECT zutat, menge, taetigkeit FROM ingredients WHERE recipe_id = ? ORDER BY sort_order"
-      )
-      .all(r.id) as IngredientRow[];
-
-    result.push({
-      name: r.name,
-      category: r.category,
-      bemerkung: r.bemerkung,
-      ingredients: ingredients.map((i) => ({
-        zutat: i.zutat,
-        menge: i.menge,
-        taetigkeit: i.taetigkeit,
-      })),
-    });
-  }
-
-  return result;
+async function nameExists(name: string): Promise<boolean> {
+  const { data, error } = await getSupabase()
+    .from("recipes")
+    .select("id")
+    .eq("name", name)
+    .limit(1);
+  if (error) throw error;
+  return !!data && data.length > 0;
 }
 
 // GET - Alle Rezepte lesen
 export async function GET() {
   try {
-    const recipes = getAllRecipes();
+    const { data, error } = await getSupabase()
+      .from("recipes")
+      .select("name, category, bemerkung, ingredients(zutat, menge, taetigkeit, sort_order)")
+      .order("name");
+    if (error) throw error;
+
+    const recipes: Recipe[] = (data as RecipeRow[]).map((r) => ({
+      name: r.name,
+      category: r.category,
+      bemerkung: r.bemerkung,
+      ingredients: [...r.ingredients]
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map((i) => ({ zutat: i.zutat, menge: i.menge, taetigkeit: i.taetigkeit })),
+    }));
     return NextResponse.json(recipes);
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+    return dbError(e);
   }
 }
 
@@ -70,32 +63,23 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const newRecipe: Recipe = await request.json();
-    const db = getDb();
 
-    const existing = db.prepare("SELECT id FROM recipes WHERE name = ?").get(newRecipe.name);
-    if (existing) {
+    if (await nameExists(newRecipe.name)) {
       return NextResponse.json({ error: "Rezept existiert bereits" }, { status: 400 });
     }
 
-    const tx = db.transaction(() => {
-      const info = db
-        .prepare("INSERT INTO recipes (name, category, bemerkung) VALUES (?, ?, ?)")
-        .run(newRecipe.name, newRecipe.category, newRecipe.bemerkung ?? "");
-
-      const recipeId = info.lastInsertRowid;
-      const insertIng = db.prepare(
-        "INSERT INTO ingredients (recipe_id, zutat, menge, taetigkeit, sort_order) VALUES (?, ?, ?, ?, ?)"
-      );
-      newRecipe.ingredients.forEach((ing, i) => {
-        insertIng.run(recipeId, ing.zutat, ing.menge, ing.taetigkeit, i);
-      });
+    const { error } = await getSupabase().rpc("save_recipe", {
+      p_original_name: null,
+      p_name: newRecipe.name,
+      p_category: newRecipe.category,
+      p_bemerkung: newRecipe.bemerkung ?? "",
+      p_ingredients: newRecipe.ingredients,
     });
+    if (error) throw error;
 
-    tx();
     return NextResponse.json(newRecipe, { status: 201 });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+    return dbError(e);
   }
 }
 
@@ -103,68 +87,51 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   try {
     const { originalName, recipe }: { originalName: string; recipe: Recipe } = await request.json();
-    const db = getDb();
 
-    const existing = db.prepare("SELECT id FROM recipes WHERE name = ?").get(originalName) as { id: number } | undefined;
-    if (!existing) {
+    if (!(await nameExists(originalName))) {
       return NextResponse.json({ error: "Rezept nicht gefunden" }, { status: 404 });
     }
 
-    if (originalName !== recipe.name) {
-      const duplicate = db.prepare("SELECT id FROM recipes WHERE name = ?").get(recipe.name);
-      if (duplicate) {
-        return NextResponse.json(
-          { error: "Ein Rezept mit diesem Namen existiert bereits" },
-          { status: 400 }
-        );
-      }
+    if (originalName !== recipe.name && (await nameExists(recipe.name))) {
+      return NextResponse.json(
+        { error: "Ein Rezept mit diesem Namen existiert bereits" },
+        { status: 400 }
+      );
     }
 
-    const tx = db.transaction(() => {
-      db.prepare("UPDATE recipes SET name = ?, category = ?, bemerkung = ? WHERE id = ?").run(
-        recipe.name,
-        recipe.category,
-        recipe.bemerkung ?? "",
-        existing.id
-      );
-
-      // Alte Zutaten löschen (ON DELETE CASCADE würde nicht helfen, da wir nur updaten)
-      db.prepare("DELETE FROM ingredients WHERE recipe_id = ?").run(existing.id);
-
-      const insertIng = db.prepare(
-        "INSERT INTO ingredients (recipe_id, zutat, menge, taetigkeit, sort_order) VALUES (?, ?, ?, ?, ?)"
-      );
-      recipe.ingredients.forEach((ing, i) => {
-        insertIng.run(existing.id, ing.zutat, ing.menge, ing.taetigkeit, i);
-      });
+    const { error } = await getSupabase().rpc("save_recipe", {
+      p_original_name: originalName,
+      p_name: recipe.name,
+      p_category: recipe.category,
+      p_bemerkung: recipe.bemerkung ?? "",
+      p_ingredients: recipe.ingredients,
     });
+    if (error) throw error;
 
-    tx();
     return NextResponse.json(recipe);
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+    return dbError(e);
   }
 }
 
-// DELETE - Rezept löschen
+// DELETE - Rezept löschen (Zutaten per ON DELETE CASCADE)
 export async function DELETE(request: Request) {
   try {
     const { name }: { name: string } = await request.json();
-    const db = getDb();
 
-    const existing = db.prepare("SELECT id FROM recipes WHERE name = ?").get(name) as { id: number } | undefined;
-    if (!existing) {
+    const { data, error } = await getSupabase()
+      .from("recipes")
+      .delete()
+      .eq("name", name)
+      .select("id");
+    if (error) throw error;
+    if (!data || data.length === 0) {
       return NextResponse.json({ error: "Rezept nicht gefunden" }, { status: 404 });
     }
 
-    // Ingredients werden durch ON DELETE CASCADE automatisch gelöscht
-    db.prepare("DELETE FROM recipes WHERE id = ?").run(existing.id);
-
     return NextResponse.json({ success: true });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+    return dbError(e);
   }
 }
 
@@ -173,15 +140,16 @@ export async function PATCH(request: Request) {
   try {
     const { oldCategory, newCategory }: { oldCategory: string; newCategory: string } =
       await request.json();
-    const db = getDb();
 
-    const info = db
-      .prepare("UPDATE recipes SET category = ? WHERE category = ?")
-      .run(newCategory, oldCategory);
+    const { data, error } = await getSupabase()
+      .from("recipes")
+      .update({ category: newCategory })
+      .eq("category", oldCategory)
+      .select("id");
+    if (error) throw error;
 
-    return NextResponse.json({ success: true, updated: info.changes });
+    return NextResponse.json({ success: true, updated: data?.length ?? 0 });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+    return dbError(e);
   }
 }

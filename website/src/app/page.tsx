@@ -427,6 +427,34 @@ export default function Home() {
     });
   }, [recipes, searchTerm, selectedCategory]);
 
+  // Rezepte nach Kategorie gruppieren (Reihenfolge wie Kategorienliste)
+  const groupedRecipes = useMemo(() => {
+    const groups = new Map<string, Recipe[]>();
+    filteredRecipes.forEach((r) => {
+      const cat = r.category || "Ohne Kategorie";
+      if (!groups.has(cat)) groups.set(cat, []);
+      groups.get(cat)!.push(r);
+    });
+    const order = categories.map((c) => c.name);
+    return [...groups.entries()].sort(([a], [b]) => {
+      const ia = order.indexOf(a);
+      const ib = order.indexOf(b);
+      return (ia === -1 ? Infinity : ia) - (ib === -1 ? Infinity : ib) || a.localeCompare(b);
+    });
+  }, [filteredRecipes, categories]);
+
+  // Aufgeklappte Kategorien (default: alle eingeklappt)
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const autoExpand = searchTerm.trim() !== "" || selectedCategory !== null;
+  const toggleGroup = (cat: string) => {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-amber-50 to-orange-100">
       {/* Header */}
@@ -626,18 +654,52 @@ export default function Home() {
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredRecipes.map((recipe) => (
-                <RecipeCard
-                  key={recipe.name}
-                  recipe={recipe}
-                  categories={categories}
-                  onEdit={handleEdit}
-                  onDelete={handleDeleteClick}
-                  isSelectedForPdf={selectedForPdf.has(recipe.name)}
-                  onTogglePdfSelection={togglePdfSelection}
-                />
-              ))}
+            <div className="space-y-3">
+              {groupedRecipes.map(([cat, items]) => {
+                const isOpen = autoExpand || openGroups.has(cat);
+                const color = categories.find((c) => c.name === cat)?.color || "#9CA3AF";
+                const selectedCount = items.filter((r) => selectedForPdf.has(r.name)).length;
+                return (
+                  <section key={cat} className="bg-white/70 rounded-xl shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(cat)}
+                      aria-expanded={isOpen}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-amber-50 rounded-xl transition-colors"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className={`h-5 w-5 text-amber-600 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                      </svg>
+                      <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                      <span className="font-bold text-amber-900 flex-1">{cat}</span>
+                      {selectedCount > 0 && (
+                        <span className="text-xs text-amber-600 font-medium">{selectedCount} ausgewählt</span>
+                      )}
+                      <span className="text-sm text-amber-700 tabular-nums">{items.length}</span>
+                    </button>
+                    {isOpen && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-4 pb-4">
+                        {items.map((recipe) => (
+                          <RecipeCard
+                            key={recipe.name}
+                            recipe={recipe}
+                            categories={categories}
+                            onEdit={handleEdit}
+                            onDelete={handleDeleteClick}
+                            isSelectedForPdf={selectedForPdf.has(recipe.name)}
+                            onTogglePdfSelection={togglePdfSelection}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
             </div>
           </>
         )}

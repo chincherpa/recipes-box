@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getSupabase } from "@/lib/supabase";
 
 interface Category {
   id: string;
@@ -8,17 +8,21 @@ interface Category {
   color: string;
 }
 
+const COLS = "id, name, icon, color";
+
+function dbError(e: unknown) {
+  console.error(e);
+  return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+}
+
 // GET - Alle Kategorien lesen
 export async function GET() {
   try {
-    const db = getDb();
-    const categories = db
-      .prepare("SELECT id, name, icon, color FROM categories ORDER BY name")
-      .all() as Category[];
-    return NextResponse.json(categories);
+    const { data, error } = await getSupabase().from("categories").select(COLS).order("name");
+    if (error) throw error;
+    return NextResponse.json(data as Category[]);
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+    return dbError(e);
   }
 }
 
@@ -26,9 +30,8 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const newCategory: Category = await request.json();
-    const db = getDb();
+    const sb = getSupabase();
 
-    // ID generieren falls nicht vorhanden
     if (!newCategory.id) {
       newCategory.id = newCategory.name
         .toLowerCase()
@@ -36,25 +39,24 @@ export async function POST(request: Request) {
         .substring(0, 20);
     }
 
-    const existing = db
-      .prepare("SELECT id FROM categories WHERE id = ? OR LOWER(name) = LOWER(?)")
-      .get(newCategory.id, newCategory.name);
-
-    if (existing) {
+    const { data: all, error: selErr } = await sb.from("categories").select("id, name");
+    if (selErr) throw selErr;
+    const lower = newCategory.name.toLowerCase();
+    if (all?.some((c) => c.id === newCategory.id || c.name.toLowerCase() === lower)) {
       return NextResponse.json({ error: "Kategorie existiert bereits" }, { status: 400 });
     }
 
-    db.prepare("INSERT INTO categories (id, name, icon, color) VALUES (?, ?, ?, ?)").run(
-      newCategory.id,
-      newCategory.name,
-      newCategory.icon,
-      newCategory.color
-    );
+    const { error } = await sb.from("categories").insert({
+      id: newCategory.id,
+      name: newCategory.name,
+      icon: newCategory.icon,
+      color: newCategory.color,
+    });
+    if (error) throw error;
 
     return NextResponse.json(newCategory, { status: 201 });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+    return dbError(e);
   }
 }
 
@@ -63,15 +65,25 @@ export async function PUT(request: Request) {
   try {
     const { originalId, category }: { originalId: string; category: Category } =
       await request.json();
-    const db = getDb();
+    const sb = getSupabase();
 
-    const existing = db.prepare("SELECT id FROM categories WHERE id = ?").get(originalId);
+    const { data: existing, error: e1 } = await sb
+      .from("categories")
+      .select("id")
+      .eq("id", originalId)
+      .maybeSingle();
+    if (e1) throw e1;
     if (!existing) {
       return NextResponse.json({ error: "Kategorie nicht gefunden" }, { status: 404 });
     }
 
     if (originalId !== category.id) {
-      const duplicate = db.prepare("SELECT id FROM categories WHERE id = ?").get(category.id);
+      const { data: duplicate, error: e2 } = await sb
+        .from("categories")
+        .select("id")
+        .eq("id", category.id)
+        .maybeSingle();
+      if (e2) throw e2;
       if (duplicate) {
         return NextResponse.json(
           { error: "Eine Kategorie mit diesem Namen existiert bereits" },
@@ -80,14 +92,15 @@ export async function PUT(request: Request) {
       }
     }
 
-    db.prepare(
-      "UPDATE categories SET id = ?, name = ?, icon = ?, color = ? WHERE id = ?"
-    ).run(category.id, category.name, category.icon, category.color, originalId);
+    const { error } = await sb
+      .from("categories")
+      .update({ id: category.id, name: category.name, icon: category.icon, color: category.color })
+      .eq("id", originalId);
+    if (error) throw error;
 
     return NextResponse.json({ category, originalName: category.name });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+    return dbError(e);
   }
 }
 
@@ -95,20 +108,23 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const { id }: { id: string } = await request.json();
-    const db = getDb();
+    const sb = getSupabase();
 
-    const existing = db.prepare("SELECT id, name, icon, color FROM categories WHERE id = ?").get(
-      id
-    ) as Category | undefined;
+    const { data: existing, error: e1 } = await sb
+      .from("categories")
+      .select(COLS)
+      .eq("id", id)
+      .maybeSingle();
+    if (e1) throw e1;
     if (!existing) {
       return NextResponse.json({ error: "Kategorie nicht gefunden" }, { status: 404 });
     }
 
-    db.prepare("DELETE FROM categories WHERE id = ?").run(id);
+    const { error } = await sb.from("categories").delete().eq("id", id);
+    if (error) throw error;
 
-    return NextResponse.json({ success: true, deletedCategory: existing });
+    return NextResponse.json({ success: true, deletedCategory: existing as Category });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Datenbankfehler" }, { status: 500 });
+    return dbError(e);
   }
 }
